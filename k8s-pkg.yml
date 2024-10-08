@@ -1,0 +1,104 @@
+- hosts: all
+  become: yes
+  remote_user: root
+  tasks:
+   
+    - name: install wget
+      yum:
+        name: wget
+        state: present
+
+    - name: Creating containerd configuration file
+      file:
+        path: "/etc/modules-load.d/containerd.conf"
+        state: "touch"
+
+    - name: Setting up pre-requisites for containerd
+      blockinfile:
+        path: "/etc/modules-load.d/containerd.conf"
+        block: |
+          overlay
+          br_netfilter
+
+    - name: Loading required modules
+      shell: |
+        sudo modprobe overlay
+        sudo modprobe br_netfilter
+
+    - name: Remove the Podman Package
+      ansible.builtin.yum:
+        name: podman
+        state: absent
+
+    - name: Download libcgroup RPM
+      command: wget http://mirror.centos.org/centos/8-stream/BaseOS/x86_64/os/Packages/libcgroup-0.41-19.el8.x86_64.rpm
+      args:
+        chdir: /tmp
+
+    - name: Install libcgroup RPM
+      command: rpm -ivh /tmp/libcgroup-0.41-19.el8.x86_64.rpm
+
+    - name: Configuring network settings for Kubernetes
+      file:
+        path: "/etc/sysctl.d/99-kubernetes-cri.conf"
+        state: "touch"
+
+    - name: Adding required settings for containerd
+      blockinfile:
+        path: "/etc/sysctl.d/99-kubernetes-cri.conf"
+        block: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.ipv4.ip_forward = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+
+    - name: Make settings applicable without restart
+      command: sudo sysctl --system
+
+    - name: Add Docker Repository
+      yum_repository:
+        name: docker
+        description: Docker CE Stable
+        baseurl: https://download.docker.com/linux/centos/8/$basearch/stable
+        gpgcheck: yes
+        gpgkey: https://download.docker.com/linux/centos/gpg
+        enabled: yes
+      when: ansible_distribution_major_version == "9"
+
+    - name: Installing containerd and setting its configuration. Restarting as well.
+      shell: |
+        sudo dnf install -y containerd
+        sudo mkdir -p /etc/containerd
+        sudo containerd config default | sudo tee /etc/containerd/config.toml
+        sudo systemctl restart containerd
+
+    - name: Create a Kubernetes repo file
+      file:
+        path: "/etc/yum.repos.d/kubernetes.repo"
+        state: "touch"
+
+    - name: Write repo information in Kubernetes repo file
+      blockinfile:
+        path: "/etc/yum.repos.d/kubernetes.repo"
+        block: |
+          [kubernetes]
+          name=Kubernetes
+          baseurl=https://pkgs.k8s.io/core:/stable:/v1.24/rpm/
+          enabled=1
+          gpgcheck=1
+          repo_gpgcheck=1
+          gpgkey=https://pkgs.k8s.io/core:/stable:/v1.24/rpm/repodata/repomd.xml.key
+
+    - name: Install Kubernetes components
+      shell: |
+        sudo dnf install -y kubelet kubeadm kubectl
+
+    - name: Disable swap as it's required for kubelet
+      shell: |
+        sudo swapoff -a
+        sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+   
+    - name: start kubelet
+      service:
+        name: kubelet
+        enabled: yes
+        state: started

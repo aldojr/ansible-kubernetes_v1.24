@@ -1,0 +1,7 @@
+[masters]
+pms-tb1
+192.168.10.60
+
+[workers]
+pms-tb2
+pms-tb3

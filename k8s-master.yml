@@ -1,0 +1,34 @@
+- hosts: masters
+  become: yes
+  remote_user: root
+  tasks:
+    - name: initialize K8S cluster
+      shell: kubeadm init --pod-network-cidr=172.16.0.0/16 --apiserver-advertise-address=192.168.10.60
+
+    - name: create .kube directory
+      file:
+        path: $HOME/.kube
+        state: directory
+        mode: 0755
+
+    - name: create .kube directory in eluon env
+      file:
+        path: /home/eluon/.kube
+        state: directory
+        mode: 0755
+
+    - name: copy admin.conf to user kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ item }}"
+        remote_src: yes
+      with_items:
+        - "{{ ansible_env.HOME }}/.kube/config"
+        - "/home/eluon/.kube/config"
+
+    - name: install Pod network
+      become: yes
+      shell: kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/calico.yaml >> pod_network_setup.txt
+      args:
+        chdir: $HOME
+        creates: pod_network_setup.txt
